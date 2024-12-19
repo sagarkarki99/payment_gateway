@@ -4,13 +4,20 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"payment-gateway/internal/services"
+	"payment-gateway/internal/utils"
 	"time"
 
 	_ "github.com/lib/pq"
 )
 
-var db *sql.DB
+var Db *sql.DB
+
+const TypeDeposit = "deposit"
+const TypeWithdraw = "withdraw"
+
+const StatusPending = "pending"
+const StatusCompleted = "completed"
+const StatusFailed = "failed"
 
 type User struct {
 	ID        int
@@ -38,27 +45,28 @@ type Country struct {
 }
 
 type Transaction struct {
-	ID        int
-	Amount    float64
-	Type      string
-	Status    string
-	UserID    int
-	GatewayID int
-	CountryID int
-	CreatedAt time.Time
+	ID           int
+	GatewayTxnId string
+	Amount       float64
+	Type         string
+	Status       string
+	UserID       int
+	GatewayID    int
+	CountryID    int
+	CreatedAt    time.Time
 }
 
 // InitializeDB initializes the database connection
 func InitializeDB(dataSourceName string) {
 	var err error
 
-	err = services.RetryOperation(func() error {
-		db, err = sql.Open("postgres", dataSourceName)
+	err = utils.RetryOperation(func() error {
+		Db, err = sql.Open("postgres", dataSourceName)
 		if err != nil {
 			return err
 		}
 
-		return db.Ping()
+		return Db.Ping()
 	}, 5)
 
 	if err != nil {
@@ -164,14 +172,87 @@ func GetCountries(db *sql.DB) ([]Country, error) {
 	return countries, nil
 }
 
-func CreateTransaction(db *sql.DB, transaction Transaction) error {
-	query := `INSERT INTO transactions (amount, type, status, gateway_id, country_id, user_id, created_at) 
-			  VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`
+func CreateTransaction(db *sql.DB, transaction *Transaction) (*Transaction, error) {
+	query := `INSERT INTO transactions (amount, type, status, gateway_id, country_id, user_id, created_at, gateway_txn_id) 
+			  VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id`
 
-	err := db.QueryRow(query, transaction.Amount, transaction.Type, transaction.Status, transaction.GatewayID, transaction.CountryID, transaction.UserID, time.Now()).Scan(&transaction.ID)
+	err := db.QueryRow(query,
+		transaction.Amount,
+		transaction.Type,
+		transaction.Status,
+		transaction.GatewayID,
+		transaction.CountryID,
+		transaction.UserID,
+		time.Now(),
+		transaction.GatewayTxnId,
+	).Scan(&transaction.ID)
 	if err != nil {
-		return fmt.Errorf("failed to insert transaction: %v", err)
+		return nil, fmt.Errorf("failed to insert transaction: %v", err)
 	}
+	return transaction, nil
+}
+
+func GetTransactionByGatewayTxnId(db *sql.DB, trxId string) (*Transaction, error) {
+	query := `SELECT id, gateway_txn_id, amount, type, status, user_id, gateway_id, country_id, created_at 
+			  FROM transactions WHERE gateway_txn_id = $1`
+
+	var transaction Transaction
+	err := db.QueryRow(query, trxId).Scan(
+		&transaction.ID,
+		&transaction.GatewayTxnId,
+		&transaction.Amount,
+		&transaction.Type,
+		&transaction.Status,
+		&transaction.UserID,
+		&transaction.GatewayID,
+		&transaction.CountryID,
+		&transaction.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch transaction: %v", err)
+	}
+
+	return &transaction, nil
+}
+
+func UpdateTransaction(db *sql.DB, transaction Transaction) error {
+	query := `UPDATE transactions 
+			  SET status = $1, 
+				  amount = $2,
+				  type = $3,
+				  gateway_id = $4,
+				  country_id = $5,
+				  user_id = $6,
+				  gateway_txn_id = $7
+			  WHERE id = $8`
+
+	result, err := db.Exec(query,
+		transaction.Status,
+		transaction.Amount,
+		transaction.Type,
+		transaction.GatewayID,
+		transaction.CountryID,
+		transaction.UserID,
+		transaction.GatewayTxnId,
+		transaction.ID)
+
+	if err != nil {
+		return fmt.Errorf("failed to update transaction: %v", err)
+	}
+
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("error getting rows affected: %v", err)
+	}
+
+	if rows == 0 {
+		return fmt.Errorf("no transaction found with id: %d", transaction.ID)
+	}
+
 	return nil
 }
 

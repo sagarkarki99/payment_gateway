@@ -13,7 +13,7 @@ import (
 var writer *kafka.Writer
 
 // Initialize the Kafka writer
-func init() {
+func Init() {
 	kafkaURL := os.Getenv("KAFKA_BROKER_URL")
 	if kafkaURL == "" {
 		kafkaURL = "kafka:9092"

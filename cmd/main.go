@@ -4,9 +4,19 @@ import (
 	"log"
 	"net/http"
 	"os"
-	"payment-gateway/db"
+	"payment-gateway/db" // swagger docs
 	"payment-gateway/internal/api"
+	"payment-gateway/internal/kafka"
+
+	"github.com/joho/godotenv"
 )
+
+func init() {
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		log.Printf("No .env file found: %v", err)
+	}
+}
 
 func main() {
 
@@ -20,12 +30,15 @@ func main() {
 	dbURL := "postgres://" + dbUser + ":" + dbPassword + "@" + dbHost + ":" + dbPort + "/" + dbName + "?sslmode=disable"
 
 	db.InitializeDB(dbURL)
+	kafka.Init()
+	defer kafka.Close()
 
 	// Set up the HTTP server and routes
 	router := api.SetupRouter()
 
 	// Start the server on port 8080
 	log.Println("Starting server on port 8080...")
+
 	if err := http.ListenAndServe(":8080", router); err != nil {
 		log.Fatalf("Could not start server: %s\n", err)
 	}

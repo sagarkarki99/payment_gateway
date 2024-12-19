@@ -1,103 +1,75 @@
-# Payment Gateway Integration Assessment
+### Overview
 
-This assessment evaluates your skills in implementing a robust and scalable payment gateway integration system within a trading platform. The system must accommodate multiple third-party payment gateways based on country and region, with support for configuring gateway priority, implementing failover mechanisms, and ensuring system resilience.
+This project is a payment gateway service that allows users to process payments using various payment gateways.
+Since, this payment service is a part of a large system, I decided to make it intact
+with the rest of the system using kafka as a message/event broker.
+The big picture of the system looks something like this:
+![Payment Gateway Architecture](payments_service_big.png)
 
-You will work with a skeleton codebase that includes prebuilt functionality, which will assist you in the implementation. You are required to implement two key endpoints and also handle the callback from gateways to update the transaction status asynchronously. Your code should support different formats depending on the gateway-supported format (your code should support at least JSON and SOAP).
+here, our service depends upon 3 different services inorder to perform the payment.
 
-## Task Overview
+1. **Account Service**: This is the service that provides the user account details like balance etc.
+2. **Compliance Service**: This service is responsible for checking the compliance of the user.
+3. **Auth Service**: This service is responsible for providing the authentication and authorization details.
 
-You will implement the following endpoints:
+### Internal Design
 
-- `/deposit`: For processing deposit transactions.
-- `/withdrawal`: For processing withdrawal transactions.
+Internally, The payment service is designed in a way that it is highly decoupled. I have followed hexagonal architecture in order to keep each component independent of each other. The basic idea is that each component(mainly, payment service as this is the business logic) talks to interface rather that direct dependency. With this its possible to test the behavior of the service via interface rather than specific implementation.
+The reason for doing this is to make the service more flexible, scalable and testable.
 
-In addition to implementing these endpoints, you will handle callback responses from gateways asynchronously to update the transaction status.
+The components are as follows:
 
-### Database
+1. **Handler**: This is the entry point of the service. It is responsible for receiving, and validating the request from the user that handles both JSON and SOAP request and responses.
+2. **Middleware**: This is the middleware that is responsible for authorizing user and external gateway request.
+3. **Payment Service**: This is the interface for the business logic of the payment service. It exposes only those functionality that is required by the handler or any other components who wants to use the payment service.
+4. **payment Service**: This is the implementation of the payment service interface, where the actual business logic is implemented. This is not exposed to the outside world.
+5. **Payment Gateway**: This is another Interface that is responsible for processing the payment with external payment gateway. It has its own implementation for different payment gateways like Stripe, Paypal, Revolut etc. Its highly scalable because we can add more payment gateways without changing the existing code and only by implementing the interface. Also this doesn't affect the payment service in any way.
+6. **Transaction Repository**: This is interface for repository that is responsible for storing the transaction details in the database. Again, this is done to keep the payment service independent of the database.
+7. **Kafka**: This is the kafka client that is responsible for sending the request to the appropriate topic for other extenal services of our overall system.
+8. Other services like **Account Service**, **Compliance Service** and **Auth Service** that the payment service depends upon are also talking directly to the interface. These are Payment service facing interface which means the implementation is as per what the payment service' needs. So that when ever something changes in the other services, only the implementation changes which makes the payment service more flexible.
 
-The database helpers can be found under `db/db_helpers.go`, and the migration/init file is under `db/init.sql`.
+![Payment Gateway Internal Design](payment_service_internal_design.png)
 
-**Hint:** The project has Docker configured, which includes PostgreSQL, Kafka, and Redis, making it easier for you to get started. However, it's not mandatory to use these services in your solution. The decision to use them depends on the architecture you design for this task.
+#### Technical Highlights
 
-### Helpers
+The project follows several key design patterns:
 
-- **`api/router.go`**: The `/deposit` and `/withdrawal` endpoints are pre-defined using `gorilla/mux`.
-- **`db_helpers.go`**: This file contains helper functions for interacting with the database, such as CRUD operations.
-- **`db/init.sql`**: This is the SQL file used for the database migrations. It defines the schema for the `gateways`, `countries`, `transactions`, and `users` tables.
-- **`kafka/publisher.go`**: This file contains helper functions for publishing messages to Kafka.
-- **`services/data_format_services.go`**: This file contains functions to decode the request based on the data format (content type). You are required to create a similar function for encoding the response.
-- **`services/fault_tolerance.go`**: This file contains helper functions for implementing fault tolerance such as circuit breakers and retry mechanisms.
-- **`services/security.go`**: This file contains helper functions for masking and unmasking data using base64 encoding (Feel free to change the algorithm for better security).
+1. **Repository Pattern**:
+   - Used for database operations
+   - Abstracts the data persistence layer
+   - Makes it easy to switch between different database implementations
+   - Simplifies testing by allowing mock implementations
 
-### Requirements
+2. **Interface Segregation**:
+   - Each external service (Account, Compliance, Auth) has its own interface
+   - Interfaces are kept small and focused
+   - Services only depend on the methods they actually need
 
-1. **Endpoints Implementation:**
-    - Implement the `/deposit` and `/withdrawal` endpoints to process transactions.
-    - Each endpoint should accept a JSON/SOAP payload with details such as `amount`, `user_id`, `gateway_id`, `country_id`, and `currency`.
+3. **Factory Pattern**:
+   - Used for creating payment gateway instances
+   - Allows dynamic selection of payment providers
+   - Makes it easy to add new payment gateways
 
-2. **Callback Handling:**
-    - Implement the logic to handle the callback from third-party gateways to update the transaction status asynchronously.
-    - The callback will include information like transaction status and should be used to update the corresponding transaction in the database.
+#### Error Handling Strategy
 
-3. **Transaction Status:**
-    - Each transaction must include a status field (e.g., "pending", "completed", "failed") which should be updated when the callback is received.
+The project implements a robust error handling mechanism using custom error types. At the core is the `ServiceError` struct which encapsulates both an error code and a message. This approach provides several benefits:
 
-4. **Data Formats:**
-    - Your solution should support at least two data formats: JSON and SOAP. You should decode the request in the appropriate format (as defined in `services/data_format_services.go`), and you should also create a function for encoding the response.
+1. **Consistent Error Responses**: All errors follow a standardized format, making it easier for clients to handle errors predictably.
+2. **Error Classification**: Errors are categorized using specific error codes (like `ErrorCodeValidation`, `ErrorCodeNotFound`, etc.), allowing for appropriate HTTP status code mapping.
 
-5. **Unit Tests:**
-    - Write unit tests to cover the business logic, especially for the endpoints, transaction processing, and callback handling.
-    - Test for edge cases and failure scenarios, such as handling invalid input, network issues, and unexpected failures from the gateway.
+#### Major Assumptions
 
-6. **Fault Tolerance:**
-    - Implement fault tolerance for your solution using the retry mechanisms and circuit breakers found in `services/fault_tolerance.go`.
+1. Itempotent scenerio for **deposit** and **withdraw** is handled by passing Idempotancy-key in the header fo the request.
+2. The payment gateway is already selected by the user and we are receiving the gateway_id in the request.
 
-7. **Security:**
-    - Use the provided helper functions in `services/security.go` to mask and unmask sensitive data before publishing to Kafka or logging it.
+#### How to run the project
 
-### How to Get Started
+1. Make sure you have docker and docker compose installed.
+2. Run the command `docker compose up` to start the services.
+3. You can check swagger UI at `http://localhost:8080/swagger/index.html` to test the API.
 
-1. **Clone the Repository:**
-    Clone the repository to your local machine:
+#### How to test the project
 
-2. **Setup Docker:**
-    Docker is configured to run PostgreSQL, Kafka, and Redis. Use the following command to start all the services:
+ You can use `go test -v ./internals/services` to run the tests.
 
-    ```bash
-    docker-compose up -d
-    ```
-
-    This will start:
-    - PostgreSQL on port `5432`
-    - Kafka on ports `9092` and `9093`
-    - Redis on port `6379`
-    - Application on port `8080`
-
-3. **Database Migration:**
-    The migration file `db/init.sql` is already provided. Once the Docker services are up and running, the database will be initialized automatically, and the tables will be created.
-
-### Deliverables
-
-- Implement the `/deposit` and `/withdrawal` endpoints.
-- Handle the callback from third-party gateways to update the transaction status.
-- Ensure that the solution supports multiple data formats (at least JSON and SOAP).
-- Implement fault tolerance and retry mechanisms where necessary.
-- Write unit tests to ensure the correctness and resilience of your solution.
-- Provide clear and concise documentation, including any architectural decisions or assumptions made and API documentation.
-
-### Important Files
-
-- **`db/db_helpers.go`**: Helper functions for interacting with the database.
-- **`db/init.sql`**: SQL migration file to initialize the database.
-- **`api/router.go`**: Defines the API routes (`/deposit` and `/withdrawal`).
-- **`services/data_format_services.go`**: Functions for handling different data formats.
-- **`services/fault_tolerance.go`**: Functions for implementing fault tolerance, including retries and circuit breakers.
-- **`services/security.go`**: Helper functions for masking/unmasking sensitive data.
-
-### Time Limit
-
-You have **3 hours** to complete this task.
-
----
-
-Good luck and happy coding!
+Note: I have added comments in the code where ever necessary to explain the context and assumptions.

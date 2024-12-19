@@ -1,4 +1,4 @@
-FROM golang:1.19-alpine
+FROM golang:1.23-alpine
 
 # Set up environment and install necessary packages
 RUN apk add --no-cache git netcat-openbsd gcc musl-dev

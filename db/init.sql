@@ -47,7 +47,8 @@ BEGIN
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  
             gateway_id INT NOT NULL,  
             country_id INT NOT NULL,  
-            user_id INT NOT NULL
+            user_id INT NOT NULL,
+            gateway_txn_id VARCHAR(255) NOT NULL
         );
     END IF;
 END $$;

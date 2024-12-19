@@ -1,0 +1,250 @@
+basePath: /
+consumes:
+- application/json
+- application/xml
+definitions:
+  models.APIError:
+    description: Error response model
+    properties:
+      error:
+        description: |-
+          Error message
+          required: true
+        example: Invalid request parameters
+        type: string
+      status_code:
+        description: |-
+          HTTP status code
+          required: true
+        example: 400
+        type: integer
+    type: object
+  models.APIResponse:
+    description: Successful API response model
+    properties:
+      data:
+        description: |-
+          Response data (only present in successful responses)
+          required: false
+      message:
+        description: |-
+          Response message
+          required: true
+        example: Operation successful
+        type: string
+      status_code:
+        description: |-
+          HTTP status code
+          required: true
+        example: 200
+        type: integer
+    type: object
+  models.PaymentCallback:
+    description: Payment gateway callback model
+    properties:
+      error_message:
+        description: |-
+          Optional error message
+          required: false
+        example: Transaction proceeded successfully.
+        type: string
+      gateway_txn_id:
+        description: |-
+          Transaction identifier
+          required: true
+        example: "123456"
+        type: string
+      status:
+        description: |-
+          Transaction status
+          required: true
+        example: completed
+        type: string
+    type: object
+  models.PaymentResult:
+    description: Payment transaction result model
+    properties:
+      transaction_id:
+        description: |-
+          Transaction identifier
+          required: true
+        example: 123456
+        type: integer
+    type: object
+  models.TransactionRequest:
+    description: Transaction request model
+    properties:
+      amount:
+        description: |-
+          Amount to process
+          required: true
+        example: 99.99
+        type: number
+      country_id:
+        description: |-
+          Country identifier (ISO 3166-1 numeric)
+          required: true
+        example: 840
+        type: integer
+      currency:
+        description: |-
+          Currency code in ISO 4217 format
+          required: true
+        example: USD
+        type: string
+      gateway_id:
+        description: |-
+          Payment gateway identifier
+          required: true
+        example: 112
+        type: integer
+    type: object
+host: localhost:8000
+info:
+  contact: {}
+  description: A payment gateway service that handles deposits and withdrawals with
+    idempotency support
+  title: Payment Gateway API
+  version: "1.0"
+paths:
+  /deposit:
+    post:
+      consumes:
+      - application/json
+      - application/xml
+      description: Process a deposit request with idempotency support
+      parameters:
+      - description: Unique key for request idempotency (UUID format)
+        example: 123e4567-e89b-12d3-a456-426614174000
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Deposit request details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.TransactionRequest'
+      produces:
+      - application/json
+      - application/xml
+      responses:
+        "200":
+          description: Deposit initiated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/models.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.PaymentResult'
+              type: object
+        "400":
+          description: Invalid request parameters or validation error
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "422":
+          description: Payment processing failed
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "502":
+          description: Payment gateway error
+          schema:
+            $ref: '#/definitions/models.APIError'
+      summary: Initiate a deposit
+      tags:
+      - Transactions
+  /payment-callback:
+    post:
+      consumes:
+      - application/json
+      - application/xml
+      description: Process callback notifications from payment gateways
+      parameters:
+      - description: Callback notification details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.PaymentCallback'
+      produces:
+      - application/json
+      - application/xml
+      responses:
+        "200":
+          description: Callback processed successfully
+          schema:
+            $ref: '#/definitions/models.APIResponse'
+        "400":
+          description: Invalid callback data or validation error
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "404":
+          description: Transaction not found
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.APIError'
+      summary: Handle payment gateway callback
+      tags:
+      - Callbacks
+  /withdraw:
+    post:
+      consumes:
+      - application/json
+      - application/xml
+      description: Process a withdrawal request with idempotency support
+      parameters:
+      - description: Unique key for request idempotency (UUID format)
+        example: 123e4567-e89b-12d3-a456-426614174000
+        in: header
+        name: Idempotency-Key
+        required: true
+        type: string
+      - description: Withdrawal request details
+        in: body
+        name: request
+        required: true
+        schema:
+          $ref: '#/definitions/models.TransactionRequest'
+      produces:
+      - application/json
+      - application/xml
+      responses:
+        "200":
+          description: Withdrawal initiated successfully
+          schema:
+            allOf:
+            - $ref: '#/definitions/models.APIResponse'
+            - properties:
+                data:
+                  $ref: '#/definitions/models.PaymentResult'
+              type: object
+        "400":
+          description: Invalid request parameters or validation error
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "422":
+          description: Insufficient funds or payment processing failed
+          schema:
+            $ref: '#/definitions/models.APIError'
+        "500":
+          description: Internal server error
+          schema:
+            $ref: '#/definitions/models.APIError'
+      summary: Initiate a withdrawal
+      tags:
+      - Transactions
+produces:
+- application/json
+- application/xml
+schemes:
+- http
+- https
+swagger: "2.0"
